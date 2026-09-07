@@ -8,7 +8,7 @@ dotnet build
 dotnet run --project src/Cli
 
 ## Середовище
-.NET SDK 8.0, Windows 11 x64 
+.NET SDK 10.0, Windows 11 x64 
 
 ## Порівняння розмірів Self-Contained публікацій
 * **win-x64:** 70,50 MB
