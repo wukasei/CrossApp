@@ -25,7 +25,8 @@ var sysInfo = new
 if(isJson){
     var options = new JsonSerializerOptions
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true
     };
     Console.WriteLine(JsonSerializer.Serialize(sysInfo, options));
 }

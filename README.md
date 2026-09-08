@@ -4,8 +4,10 @@
 Призначення: облік видач примірників книг читачам.
 
 ## Запуск
+```bash
 dotnet build
 dotnet run --project src/Cli
+```
 
 ## Середовище
 .NET SDK 10.0, Windows 11 x64 
