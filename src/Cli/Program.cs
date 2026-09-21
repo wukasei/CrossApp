@@ -43,5 +43,16 @@ double errorRate = total > 0 ? ((double)skipped / total) * 100 : 0;
 Console.WriteLine(new string('-', 50));
 Console.WriteLine($"Статистика: усього {total} | прийнято {accepted} | пропущено {skipped} | помилок {errorRate:F1}%");
 
+Console.WriteLine("\n--- ЗМІШАНИЙ ІМПОРТ ---");
+string mixedPath = Path.Combine("data", "mixed.csv");
+
+if (File.Exists(mixedPath))
+{
+    var mixedResult = LibraryMixedImporter.Load(mixedPath);
+    Console.WriteLine($"Завантажено книг: {mixedResult.Books.Count}");
+    Console.WriteLine($"Завантажено читачів: {mixedResult.Readers.Count}");
+    Console.WriteLine($"Помилок у змішаному файлі: {mixedResult.Errors.Count}");
+}
+
 return 0; 
 
