@@ -44,14 +44,11 @@ public static class LibraryMixedImporter
     {
         string[] parts = line.Split(';', StringSplitOptions.TrimEntries);
 
-        // ТОЙ САМИЙ ОДИН SWITCH
         return parts switch
         {
-            // Якщо префікс "B", парсимо як книгу (чекаємо 5 колонок)
             ["B", var id, var isbn, var title, var year] when int.TryParse(year, out int y)
                 => new ParseBookOk(new BookDto(id, isbn, title, y)),
                 
-            // Якщо префікс "R", парсимо як читача (чекаємо 4 колонки)
             ["R", var id, var name, var phone]
                 => new ParseReaderOk(new ReaderDto(id, name, phone)),
                 
