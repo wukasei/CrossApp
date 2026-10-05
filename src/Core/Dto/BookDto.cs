@@ -5,5 +5,6 @@ public record BookDto(
     string Isbn,
     string Title,
     int Year,
-    string? Author = null
+    string? Author = null,
+    bool IsIssued = false
 );
