@@ -73,3 +73,26 @@ Records з лабораторної 3 (`BookDto`, `LoanDto`) лишились я
 - **Імпорт → сутності:** `BookCopy.FromImport(ImportResult<BookDto>)` повертає `ImportResult<BookCopy>`: прийняті примірники плюс помилки імпорту й порушення інваріантів.
 - **Правило на дві сутності:** `LoanService.OpenLoan` (`src/Core/Services`) не дозволяє читачу мати більше 5 відкритих видач (`InvalidOperationException`). Правило винесено в сервіс, бо окрема сутність не знає про інші видачі читача: для перевірки потрібен перелік усіх видач зі сховища.
 - **Стан через enum:** `CopyStatus { Available, Issued, WrittenOff }`; допустимі переходи перевіряються в `BookCopy.MoveTo` через switch expression. Списаний примірник не можна видати, виданий не можна списати.
+
+## Лабораторна 5 — Сервісний шар, інтерфейси, ручний DI
+
+- **Інтерфейс:** `IBookStore` (`src/Core/Abstractions`) — `List`, `GetById`, `Add`, `Update`, `Remove`.
+- **Реалізації** (`src/Core/Storage`):
+  - `InMemoryBookStore` — дані в пам'яті, стартові записи з `SampleData`, після виходу зникають;
+  - `FileBookStore` — дані в `data/catalog.json` поруч зі збіркою (JSON-масив `BookDto`), зберігаються між запусками.
+- **Сервіс:** `LendingService` (`src/Core/Services`) — `AddBook`, `IssueCopy`, `ReturnCopy`, `All`, `Find`. Отримує `IBookStore` через конструктор.
+- **Схема:** `Cli → LendingService → IBookStore → InMemoryBookStore | FileBookStore`
+- Конкретні класи створюються лише в `Cli`. DI-контейнер не підключено.
+
+### Запуск
+```bash
+dotnet run --project src/Cli                    # пам'ять
+dotnet run --project src/Cli -- --file          # файл
+dotnet run --project src/Cli -- --cache         # пам'ять + кеш
+dotnet run --project src/Cli -- --file --cache  # файл + кеш
+```
+
+### Додаткові завдання
+- `CachingBookStore` — декоратор над будь-яким `IBookStore`, кешує `List()`.
+- `LendingService.Search(Func<BookCopy, bool>)` — пошук за довільним правилом.
+- `StoreFactory.Create(args)` (`src/Cli`) — вибір сховища за аргументами.
