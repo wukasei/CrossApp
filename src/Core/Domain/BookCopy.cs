@@ -92,13 +92,17 @@ public sealed class BookCopy
         return copy;
     }
 
-    public static ImportResult<BookCopy> FromImport(ImportResult<BookDto> imported)
+    public static ImportResult<BookCopy> FromImport(ImportResult<BookDto> imported,
+                                                Action<string>? onSkipped = null)
     {
         if (imported is null)
             throw new ArgumentNullException(nameof(imported), "Не передано результат імпорту");
 
         List<BookCopy> copies = new();
         List<string> errors = new(imported.Errors);
+
+        foreach (string error in imported.Errors)
+            onSkipped?.Invoke(error);
 
         foreach (BookDto dto in imported.Items)
         {
@@ -108,7 +112,9 @@ public sealed class BookCopy
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
             {
-                errors.Add($"Книжка {dto.Id}: {ex.Message}");
+                string message = $"Книжка {dto.Id}: {ex.Message}";
+                errors.Add(message);
+                onSkipped?.Invoke(message);   // повідомили про пропущений рядок
             }
         }
 

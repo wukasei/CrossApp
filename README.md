@@ -96,3 +96,38 @@ dotnet run --project src/Cli -- --file --cache  # файл + кеш
 - `CachingBookStore` — декоратор над будь-яким `IBookStore`, кешує `List()`.
 - `LendingService.Search(Func<BookCopy, bool>)` — пошук за довільним правилом.
 - `StoreFactory.Create(args)` (`src/Cli`) — вибір сховища за аргументами.
+
+## Лабораторна 6 — Доменні події, делегати, лямбди
+
+- **Вид події:** `LibraryChangeKind` (`src/Core/Events`) — `BookAdded`, `CopyIssued`, `CopyReturned`.
+- **Дані події:** `LibraryChangedEventArgs : EventArgs` (`src/Core/Events`) — `Kind`, `Isbn`, `CopyId`, `ReaderId`, `DueDate`, `At`. Властивості лише для читання; `ReaderId` і `DueDate` заповнюються тільки для видачі.
+- **Подія:** `public event EventHandler<LibraryChangedEventArgs>? Changed` у `LendingService`. Піднімається через приватний метод `OnChanged` (`Changed?.Invoke(...)`) у кінці `AddBook`, `IssueCopy`, `ReturnCopy` — лише після успішної зміни стану й збереження в сховищі. Якщо інваріант `BookCopy` кидає виняток, подія не виникає.
+- **Зміна сигнатури:** `IssueCopy(id, readerId)` — тепер приймає id читача; дата повернення обчислюється як сьогодні + `LoanPeriodDays` (14 днів).
+- Core не пише в консоль і у файли: пошук у `src/Core` за `Console` і `logs` дає 0 результатів.
+
+### Підписники (Cli)
+- `OnLibraryChanged` — локальна функція; виводить рядок події в консоль і дописує його у `logs/app.log` поруч зі збіркою. Шлях будується через `Path.Combine`, каталог створюється `Directory.CreateDirectory`.
+- Лямбда-лічильник `(_, _) => changes++` — замикання над локальною змінною `changes`.
+- Обробники викликаються по черзі в порядку підписки: спочатку рядок логу, потім лічильник.
+- Надалі подію оброблятимуть логер проєкту Api (тиждень 10) і компонент Blazor (тиждень 12); `LendingService` для цього змінювати не потрібно.
+
+### Демонстрація
+`dotnet run --project src/Cli`:
+1. Додавання книжки й видача — два рядки подій у консолі та в `app.log`.
+2. Сценарій відмови (неіснуючий id, повторна видача) — текст помилки, рядків подій немає.
+3. Повернення книжки — рядок події, `Подій отримано: 3`.
+4. `service.Changed -= OnLibraryChanged` і повторна видача — рядка логу немає, лічильник збільшився до 4, примірник видано. В `app.log` ця операція не потрапляє.
+
+### Делегат Func
+`LendingService.Search(Func<BookCopy, bool>)` (з лабораторної 5) використано як приклад, де потрібен результат: умову передає викликач, напр. `Search(c => c.IsIssued)`. Подія лише сповіщає і нічого не повертає, тому для пошуку застосовано `Func`.
+
+### Додаткові завдання
+- **INotificationSink** (`src/Core/Abstractions`) — інтерфейс з методом `Notify(LibraryChangedEventArgs)`. Реалізації лежать у Cli, бо пишуть у консоль і файл:
+  - `ConsoleSink` (`src/Cli/ConsoleSink.cs`) — виводить рядок `[ConsoleSink] ...` у консоль;
+  - `FileSink` (`src/Cli/FileSink.cs`) — дописує рядок `[FileSink] ...` у `logs/app.log`.
+
+  `LendingService` приймає `IEnumerable<INotificationSink>?` другим необов'язковим параметром конструктора (ручний DI, як `IBookStore` у лабораторній 5). `OnChanged` спершу піднімає подію `Changed`, потім викликає `Notify` у кожного sink. У `Program.cs` створюється окремий сервіс `new LendingService(store, [new ConsoleSink(), new FileSink(logPath)])`: на його подію ніхто не підписаний, але повідомлення про повернення книжки надходить через sinks.
+
+  **Подія vs INotificationSink:** подія не показує, хто слухає сервіс; підписатися й відписатися можна будь-коли (`+=` / `-=`), але забута відписка може тримати об'єкт у пам'яті. Sinks передаються явно через конструктор: залежність видно одразу, у тестах легко підставити фальшивий sink, проте змінити набір отримувачів після створення сервісу не можна.
+
+- **Action<string> в імпорті:** `BookCopy.FromImport(ImportResult<BookDto>, Action<string>? onSkipped = null)` викликає `onSkipped` для кожного пропущеного рядка: помилок розбору й порушень інваріантів. Що робити з повідомленням, вирішує викликач; у Cli це лямбда `msg => Console.WriteLine($"  пропущено: {msg}")`. Параметр необов'язковий, тому попередні виклики `FromImport` працюють без змін.
