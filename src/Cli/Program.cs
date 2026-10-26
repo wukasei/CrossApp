@@ -1,13 +1,82 @@
 ﻿using Cli;
+using Core;
 using Core.Abstractions;
 using Core.Events;      
 using Core.Services;
 using Core.Storage;
 using Core.Domain;
 using Core.Dto;
+using Core.Reports;
 
 IBookStore store = StoreFactory.Create(args);
 var service = new LendingService(store);
+
+var command = args.FirstOrDefault(a => a.StartsWith("report-"));
+
+if (command is not null)
+{
+    var items = service.All();
+
+    switch (command)
+    {
+        case "report-issued":
+            PrintCopies(ReportService.Issued(items));
+            break;
+
+        case "report-top":
+            PrintCopies(ReportService.TopNewest(items, 5));
+            break;
+
+        case "report-groups":
+            PrintGroups(ReportService.ByTitle(items));
+            break;
+
+        case "report-groups-q":   // додаткове 3: синтаксис запитів
+            PrintGroups(ReportService.ByTitleQuery(items));
+            break;
+
+        case "report-sum":
+            var t = ReportService.Totals(items);
+            Console.WriteLine($" примірників {t.Copies}, видано {t.Issued}, " +
+                              $"в середньому {t.AverageCopies:F2} прим. на книжку, найновіший рік {t.NewestYear}");
+            break;
+
+        case "report-demo":
+            var d = ReportService.DeferredDemo(items);
+            Console.WriteLine($" Виданих до змін:     {d.Before}");
+            Console.WriteLine($" Виданих після змін:  {d.After}");
+            Console.WriteLine($" У знімку лишилось:   {d.InSnapshot}");
+            break;
+
+        case "report-loans":      // додаткове 1: Join
+            foreach (var l in ReportService.LoanHistory(items, SampleData.Loans()))
+                Console.WriteLine($" {l.LoanId,-6} {l.CopyId,-6} {l.Title,-24} {l.ReaderId,-6} " +
+                                  $"{l.IssuedOn:dd.MM.yyyy} → {l.ReturnedOn?.ToString("dd.MM.yyyy") ?? "на руках"}");
+            break;
+
+        case "report-readers":    // додаткове 2: TopBy
+            foreach (var r in ReportService.TopReaders(SampleData.Loans(), 5))
+                Console.WriteLine($" {r.Key,-6} видач: {r.Count,2}   на руках: {r.IssuedCount,2}");
+            break;
+
+        case "report-bench":      // додаткове 4: Stopwatch
+            var data = SampleData.Generate(100_000);
+            var b = Benchmark.TopIssued(data, 20);
+            Console.WriteLine($" {data.Count} записів, середнє з 20 запусків:");
+            Console.WriteLine($" без ToList у середині: {b.PlainMs,8:F2} мс");
+            Console.WriteLine($" з ToList у середині:   {b.MiddleToListMs,8:F2} мс");
+            break;
+
+        default:
+            Console.WriteLine("report-issued | report-top | report-groups | report-sum | report-demo");
+            Console.WriteLine("report-loans | report-readers | report-groups-q | report-bench");
+            break;
+    }
+
+    return;   // звіт показано, демо попередніх тижнів не запускаємо
+}
+
+// ===== Тижні 5-6: демо (запускається, якщо команди звіту немає) =====
 
 var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
@@ -116,3 +185,16 @@ var raw = new ImportResult<BookDto>(
 
 var imported = BookCopy.FromImport(raw, msg => Console.WriteLine($"  пропущено: {msg}"));
 Console.WriteLine($"Прийнято примірників: {imported.Items.Count}");
+
+// ===== Тиждень 7: друк рядків звіту =====
+static void PrintCopies(IReadOnlyList<CopyLine> lines)
+{
+    foreach (var l in lines)
+        Console.WriteLine($" {l.Id,-7} {l.Title,-24} {l.Author ?? "—",-24} {l.Year}  {l.Status}");
+}
+
+static void PrintGroups(IReadOnlyList<GroupSummary> groups)
+{
+    foreach (var g in groups)
+        Console.WriteLine($" {g.Key,-24} примірників: {g.Count,2}   видано: {g.IssuedCount,2}");
+}
