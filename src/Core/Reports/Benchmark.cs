@@ -16,7 +16,6 @@ public static class Benchmark
         return (plain, middle);
     }
 
-    // Ручний цикл тут виправданий: треба повторити дію runs разів, а не обробити колекцію
     private static double Measure(Action action, int runs)
     {
         var sw = Stopwatch.StartNew();

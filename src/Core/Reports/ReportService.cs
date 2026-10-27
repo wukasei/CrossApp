@@ -48,8 +48,8 @@ public static class ReportService
     //Демонстрація відкладеного виконання
     public static (int Before, int After, int InSnapshot) DeferredDemo(IEnumerable<BookCopy> items)
     {
-        var source = items.ToList();                 // свій список, у який можна додавати
-        var query = source.Where(c => c.IsIssued);   // запит побудовано, але НЕ виконано
+        var source = items.ToList();                 
+        var query = source.Where(c => c.IsIssued);   
 
         int before = query.Count();                  
 
@@ -59,10 +59,10 @@ public static class ReportService
 
         int after = query.Count();                   
 
-        var snapshot = query.ToList();               // виконали і ЗБЕРЕГЛИ результат
-        source.Clear();                              // джерело тепер порожнє
+        var snapshot = query.ToList();               
+        source.Clear();                              
 
-        return (before, after, snapshot.Count);      // знімок не змінився
+        return (before, after, snapshot.Count);      
     }
 
     //Додаткове 1: Join примірників і видач у зведений DTO
