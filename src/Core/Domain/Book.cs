@@ -45,7 +45,7 @@ public sealed class Book
             throw new ArgumentException(
                 $"Примірник {copy.Id} має ISBN {copy.Isbn}, а книга «{Title}» — {Isbn}", nameof(copy));
         if (_copies.Any(c => c.Id == copy.Id))
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Примірник {copy.Id} вже доданий до книги «{Title}»");
 
         _copies.Add(copy);

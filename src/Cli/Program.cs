@@ -7,9 +7,78 @@ using Core.Storage;
 using Core.Domain;
 using Core.Dto;
 using Core.Reports;
+using System.Text.Json;
 
 IBookStore store = StoreFactory.Create(args);
 var service = new LendingService(store);
+
+// ===== Тиждень 8: генерація великого файлу (для демонстрації скасування) =====
+// dotnet run --project src/Cli -- gen-import data/big.json 300000
+if (args.Contains("gen-import"))
+{
+    var genPath = After("gen-import") ?? "data/big.json";
+    var count = int.TryParse(After("gen-import", 2), out var n) ? n : 300_000;
+
+    var genDtos = SampleData.Generate(count).Select(c => c.ToDto()).ToList();
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(genPath))!);
+
+    await using var fs = new FileStream(genPath, FileMode.Create, FileAccess.Write,
+                                        FileShare.None, bufferSize: 4096, useAsync: true);
+    await JsonSerializer.SerializeAsync(fs, genDtos);
+
+    Console.WriteLine($"Згенеровано {count} записів у {genPath}");
+    return;
+}
+
+// ===== Тиждень 8: асинхронний імпорт зі скасуванням =====
+// dotnet run --project src/Cli -- import data/import.json [--timeout 100]
+if (args.Contains("import"))
+{
+    var dataPath = After("import") ?? "data/import.json";
+    var stream = args.Contains("--stream");
+    TimeSpan? timeout = int.TryParse(After("--timeout"), out var timeoutMs)
+        ? TimeSpan.FromMilliseconds(timeoutMs)
+        : null;
+    var progress = args.Contains("--progress") ? new ConsoleProgress() : null;   // додаткове 3
+
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };   // Ctrl+C
+
+    string message;
+    try
+    {
+        var importer = new JsonBookImporter();
+        int added;
+
+        if (timeout is TimeSpan limit)   // додаткове 2: зв'язані токени (Ctrl+C + таймаут)
+            added = stream
+                ? await service.ImportStreamWithTimeoutAsync(importer, dataPath, limit, cts.Token)
+                : await service.ImportWithTimeoutAsync(importer, dataPath, limit, cts.Token, progress);
+        else
+            added = stream
+                ? await service.ImportStreamAsync(importer, dataPath, cts.Token)
+                : await service.ImportAsync(importer, dataPath, cts.Token, progress);
+
+        message = $"Імпортовано записів: {added}";
+    }
+    catch (TimeoutException ex)         { message = $"Імпорт перервано за таймаутом: {ex.Message}"; }
+    catch (OperationCanceledException) { message = "Імпорт скасовано."; }
+    catch (DomainException ex)          { message = $"Дані відхилено: {ex.Message}"; }
+    catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                                        { message = $"Файл не знайдено: {dataPath}"; }
+    catch (JsonException ex)            { message = $"Файл не є коректним JSON: {ex.Message}"; }
+
+    progress?.EndLine();
+    Console.WriteLine(message);
+    return;
+}
+
+// значення аргументу, що йде після name (offset = 1 — наступний, 2 — через один)
+string? After(string name, int offset = 1)
+{
+    int i = Array.IndexOf(args, name);
+    return i >= 0 && i + offset < args.Length ? args[i + offset] : null;
+}
 
 var command = args.FirstOrDefault(a => a.StartsWith("report-"));
 
@@ -142,7 +211,7 @@ try
 {
     service.IssueCopy("NOPE-999", "R-001");   
 }
-catch (InvalidOperationException ex)
+catch (DomainException ex)
 {
     Console.WriteLine($"  Помилка: {ex.Message}");
 }
@@ -151,7 +220,7 @@ try
 {
     service.IssueCopy(created.Id, "R-002");   
 }
-catch (InvalidOperationException ex)
+catch (DomainException ex)
 {
     Console.WriteLine($"  Помилка: {ex.Message}");
 }

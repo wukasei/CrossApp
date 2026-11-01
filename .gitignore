@@ -482,3 +482,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Лаба 8: великий згенерований файл для демонстрації скасування
+data/big.json
+
+# Лаба 8: звіт покриття
+coverage-report/

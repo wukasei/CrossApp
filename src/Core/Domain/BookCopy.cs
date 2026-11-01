@@ -72,7 +72,7 @@ public sealed class BookCopy
         };
 
         if (error is not null)
-            throw new InvalidOperationException($"Примірник {Id} («{Title}») {error}");
+            throw new DomainException($"Примірник {Id} («{Title}») {error}");
 
         Status = target;
     }
@@ -110,7 +110,7 @@ public sealed class BookCopy
             {
                 copies.Add(FromDto(dto));
             }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            catch (Exception ex) when (ex is ArgumentException or DomainException)
             {
                 string message = $"Книжка {dto.Id}: {ex.Message}";
                 errors.Add(message);

@@ -14,7 +14,7 @@ public static class LoanService
         int openCount = existingLoans.Count(l => l.ReaderId == readerId?.Trim() && !l.IsClosed);
 
         if (openCount >= MaxOpenLoansPerReader)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Читач {readerId} вже має {openCount} відкритих видач (максимум {MaxOpenLoansPerReader}), нову видачу оформити неможливо");
 
         return Loan.Open(loanId, copy, readerId, issuedOn);

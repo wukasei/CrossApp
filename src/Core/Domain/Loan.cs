@@ -45,11 +45,11 @@ public sealed class Loan
             throw new ArgumentNullException(nameof(copy), "Не вказано примірник, який повертають");
 
         if (IsClosed)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Видача {Id} вже закрита {ReturnedOn:dd.MM.yyyy}, повторне закриття неможливе");
 
         if (copy.Id != BookCopyId)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Видача {Id} стосується примірника {BookCopyId}, а повертають {copy.Id}");
 
         if (returnedOn < IssuedOn)

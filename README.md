@@ -171,3 +171,79 @@ dotnet run --project src/Cli -- report-sum
   | з `ToList` у середині | 13,86 мс |
 
   Проміжні `ToList` створюють зайві списки й змушують повністю сортувати ~25 000 виданих примірників, хоча потрібні лише 5.
+
+## Лабораторна 8 — async/await, скасування, доменні винятки, unit-тести
+
+### Що стало асинхронним
+- **Імпорт каталогу з файлу** — `IBookImporter.LoadAsync` (`src/Core/Abstractions`), реалізація `JsonBookImporter` (`src/Core/Storage`). Читання через `FileStream(..., useAsync: true)` і `JsonSerializer.DeserializeAsync`, без `Task.Run`. Це тривала операція введення-виведення, на великому файлі вона займає помітний час, і її має бути можливо скасувати.
+- **`LendingService.ImportAsync(importer, path, ct)`** — імпортер приходить параметром (ручний DI, як `IBookStore` у лабораторній 5). Для кожного доданого примірника піднімається подія `BookAdded`. Примірники з уже наявним `Id` пропускаються, тому повторний імпорт нічого не дублює.
+- **Синхронними лишились** `IBookStore` і його реалізації, `AddBook`, `IssueCopy`, `ReturnCopy`, звіти. Операції в пам'яті миттєві, а асинхронне сховище з'явиться разом з EF Core (тиждень 11).
+
+### Скасування
+Ланцюжок токена: `Program.cs` (`CancellationTokenSource`) → `ImportAsync(..., ct)` → `LoadAsync(path, ct)` → `DeserializeAsync(..., ct)`. У циклах викликається `ct.ThrowIfCancellationRequested()`. На початку `ImportAsync` і `LoadAsync` теж є перевірка: якщо токен уже скасовано, файл навіть не відкривається.
+
+Джерела скасування в Cli: Ctrl+C (`Console.CancelKeyPress`, `e.Cancel = true`) і таймаут `--timeout <мс>`. `OperationCanceledException` перехоплюється окремим `catch`, раніше за інші, і виводиться «Імпорт скасовано.», а не стектрейс.
+
+### Доменні винятки
+`DomainException` (`src/Core/DomainException.cs`) — порушення бізнес-правила. Замінив `InvalidOperationException` у `BookCopy.MoveTo` (повторна видача, повернення невиданого, операції зі списаним), `Loan.Close`, `Book.AddCopy`, `LoanService.OpenLoan`, `LendingService` («немає примірника»). Типи винятків у таблиці інваріантів лабораторної 4 для цих правил тепер `DomainException`.
+
+- `ArgumentException` — некоректний аргумент методу: порожній `readerId`, порожня назва, рік 1200.
+- `DomainException` — аргументи коректні, але так не можна за правилами бібліотеки: видати вже виданий примірник.
+- Технічні помилки (`FileNotFoundException`, `JsonException`) не маскуються під доменні: вони проходять до Cli, де обробляються окремо.
+
+Під час імпорту `ArgumentException` із `BookCopy.FromDto` загортається в `DomainException("Запис N: ...")` з початковим винятком в `InnerException`, щоб не загубити причину.
+
+Винятки сховищ («примірник уже існує» в `InMemoryBookStore`, `FileBookStore`) лишились `InvalidOperationException`: це помилка шару зберігання, а не бізнес-правило.
+
+### Запуск
+```bash
+dotnet run --project src/Cli -- import data/import.json          # Імпортовано записів: 6
+dotnet run --project src/Cli -- import data/import-bad.json      # Дані відхилено: Запис 3: Рік видання ...
+dotnet run --project src/Cli -- import data/nema.json            # Файл не знайдено: data/nema.json
+dotnet run --project src/Cli -- gen-import data/big.json 300000  # великий файл для демонстрації скасування
+dotnet run --project src/Cli -- import data/big.json --timeout 100
+```
+Без `--timeout` можна натиснути Ctrl+C під час імпорту великого файлу. `data/big.json` додано в `.gitignore`.
+
+### Тести
+Проєкт `tests/Core.Tests` (xUnit), посилається лише на Core. Сховище в тестах — `InMemoryBookStore`, дані — власний `TestData.Items()` (5 примірників, два з однаковим роком), а не `SampleData`. Тести, яким потрібен файл, пишуть його в `Path.GetTempPath()` і видаляють у `finally`. `data/` у репозиторії тести не читають.
+
+```bash
+dotnet test
+# Test summary: total: 16; failed: 0; succeeded: 16
+```
+
+| Тест | Що перевіряє | Очікуваний результат |
+|------|--------------|----------------------|
+| `IssueCopy_WithEmptyReader_ThrowsArgumentException_AndKeepsState` | порожній читач | `ArgumentException`, примірник на полиці |
+| `IssueCopy_WhenAlreadyIssued_ThrowsDomainException_AndRaisesNoEvent` | повторна видача | `DomainException`, подій 0, стан не змінився |
+| `ReturnCopy_WhenNotIssued_ThrowsDomainException_AndKeepsState` | повернення невиданого | `DomainException`, стан не змінився |
+| `AddBook_RaisesChangedExactlyOnce` | подія з лабораторної 6 | рівно одна подія `BookAdded` |
+| `TopNewest_ReturnsAtMostN` (`[Theory]`, 3 набори) | кількість у топ-N | 0→0, 3→3, 10→5 |
+| `TopNewest_IsDeterministic` | стабільний порядок | T-05, T-02, T-03 |
+| `ImportAsync_WhenAlreadyCancelled_Throws` | заздалегідь скасований токен | `OperationCanceledException` |
+| `ImportAsync_Twice_AddsOnlyOnce` | ідемпотентність | 2, потім 0; подій 2 |
+| `ImportAsync_WithInvalidRecord_ThrowsDomainException` | зіпсований запис у файлі | `DomainException` «Запис 2», `InnerException` збережено, сховище порожнє |
+| `ImportStreamAsync_WhenAlreadyCancelled_Throws` | токен через `WithCancellation` | `OperationCanceledException` |
+| `ImportStreamAsync_WithInvalidRecord_AddsRecordsBeforeError` | потоковий імпорт із помилкою | `DomainException` «Запис 3», у сховищі 2 записи |
+| `ImportWithTimeout_WhenTimeoutExpires_ThrowsTimeoutException` | спрацював таймаут | `TimeoutException`, токен користувача не скасовано |
+| `ImportWithTimeout_WhenUserCancels_ThrowsOperationCanceled` | скасував користувач | `OperationCanceledException`, не таймаут |
+| `ImportAsync_ReportsProgress` | хід імпорту | 25, 50, 75, 100 |
+
+Тест на подію не потребує ні консолі, ні диска: підписник — лямбда, що складає події в список.
+
+### Самоперевірка
+- Пошук по solution за `.Result`, `.Wait()`, `async void` — 0 результатів.
+- `dotnet test` двічі підряд — той самий результат: кожен тест створює нове сховище, статичного стану немає.
+- Усі асинхронні тести оголошені як `async Task`.
+
+### Додаткові завдання
+- **Потоковий імпорт** (`--stream`): `IBookStreamImporter.StreamAsync` повертає `IAsyncEnumerable<BookCopy>` через `JsonSerializer.DeserializeAsyncEnumerable`. Параметр токена позначено `[EnumeratorCancellation]`, тому токен, переданий через `.WithCancellation(ct)` у `await foreach` (`LendingService.ImportStreamAsync`), доходить до методу. Відмінність від `ImportAsync`: звичайний імпорт відхиляє файл цілком, потоковий додає записи по одному, тож ті, що до помилки, вже в сховищі.
+- **Зв'язані токени** (`--timeout`): `ImportWithTimeoutAsync` / `ImportStreamWithTimeoutAsync` створюють токен таймауту й об'єднують його з токеном користувача через `CancellationTokenSource.CreateLinkedTokenSource`. Якщо скасування спричинив таймаут, а не користувач, `OperationCanceledException` перетворюється на `TimeoutException`. Cli розрізняє: «Імпорт скасовано.» (Ctrl+C) і «Імпорт перервано за таймаутом».
+- **IProgress<int>** (`--progress`): `ImportAsync` повідомляє відсоток оброблених записів, лише коли він змінився. У Cli — `ConsoleProgress` (`src/Cli/ConsoleProgress.cs`), малює відсотки в одному рядку через `\r`. Використано власну реалізацію, а не `Progress<T>`: у консолі `Progress<T>` викликає обробник асинхронно в пулі потоків, і відсотки можуть прийти не по порядку або після підсумкового повідомлення. Для потокового імпорту прогресу немає: загальна кількість записів невідома до кінця файлу.
+- **Покриття:**
+  ```bash
+  dotnet test --collect:"XPlat Code Coverage"
+  reportgenerator -reports:"tests/Core.Tests/TestResults/*/coverage.cobertura.xml" -targetdir:coverage-report -reporttypes:"Html;TextSummary"
+  ```
+  Покриття рядків Core — 26.8% (195 з 726). Змінені в цій роботі класи покриті високо: `JsonBookImporter` — 92.5%, `LendingService` — 79.5%, `InMemoryBookStore` — 76.9%. Не покриті `FileBookStore` (працює з диском, тож це предмет інтеграційних, а не модульних тестів), демо й допоміжний код (`SampleData`, `Benchmark`, `EnvironmentInfo`) та старі імпортери `Core.Import`. Не покрита також доменна логіка видач (`Loan`, `LoanService`) і більшість `ReportService`: це не входило в обсяг роботи, але є кандидатом на тести надалі. `coverage-report/` додано в `.gitignore`.
