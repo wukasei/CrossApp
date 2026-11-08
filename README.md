@@ -320,13 +320,12 @@ CROSSAPP_Logging__MinimumLevel=Warning dotnet run --project src/Cli -- report-su
 Secret — навчальний рядок `Integration:ApiKey`. У консоль друкується лише факт наявності й довжина.
 ```bash
 dotnet user-secrets init --project src/Cli          # дописує <UserSecretsId> у Cli.csproj (GUID комітиться)
-dotnet user-secrets set "Integration:ApiKey" "local-dev-key" --project src/Cli
-dotnet user-secrets list --project src/Cli
+dotnet user-secrets list --project src/Cli          # показує Integration:ApiKey
 ```
+Значення ключа задається командою `dotnet user-secrets set "Integration:ApiKey" ... --project src/Cli` і в репозиторії не зберігається.
 - Розташування `secrets.json`: Windows — `%APPDATA%\Microsoft\UserSecrets\b653d233-dd22-47c0-85dc-4c0fb8d057e5\secrets.json`; Linux/macOS — `~/.microsoft/usersecrets/<UserSecretsId>/secrets.json`.
 - Файл лежить поза репозиторієм і не шифрується, тому user-secrets — лише для локальної розробки. На сервері — змінна `CROSSAPP_Integration__ApiKey` або сховище секретів.
-- Перевірка: `git status` після `set` не містить `secrets.json`; `git grep --untracked -n "local-dev-key"` — 0 результатів.
-
+- Перевірка: `git status` після `set` не містить `secrets.json`; пошук значення ключа через `git grep` — 0 результатів.
 ```
 ApiKey     : присутній, довжина 13     # з user-secrets
 ApiKey     : присутній, довжина 8      # CROSSAPP_Integration__ApiKey=from-env перекрила secret
