@@ -8,9 +8,75 @@ using Core.Domain;
 using Core.Dto;
 using Core.Reports;
 using System.Text.Json;
+using Core.Configuration;
+using Microsoft.Extensions.Configuration;
+using System.Reflection;
 
-IBookStore store = StoreFactory.Create(args);
+// ===== Тиждень 9: конфігурація =====
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+var envName = Environment.GetEnvironmentVariable("CROSSAPP_ENVIRONMENT") ?? "Development";
+
+var config = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+    .AddJsonFile($"appsettings.{envName}.json", optional: true)
+    .AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true)
+    .AddEnvironmentVariables(prefix: "CROSSAPP_")
+    .Build();
+
+var options = config.Get<AppOptions>() ?? new AppOptions();
+
+// проста змінна CROSSAPP_DATA_PATH перекриває розділ Storage
+var legacy = Environment.GetEnvironmentVariable("CROSSAPP_DATA_PATH");
+var storage = new StorageOptions
+{
+    DataPath = string.IsNullOrWhiteSpace(legacy) ? options.Storage.DataPath : legacy,
+    FileName = options.Storage.FileName
+};
+
+Console.WriteLine($"Профіль    : {options.EnvironmentName}, лог: {options.Logging.MinimumLevel}");
+var dataFile = storage.ResolveFullPath(AppContext.BaseDirectory);
+Console.WriteLine($"Файл даних : {dataFile}");
+Console.WriteLine($"LoanDays   : {options.Library.LoanDays}");
+
+var apiKey = config["Integration:ApiKey"];
+Console.WriteLine(apiKey is null
+    ? "ApiKey     : не заданий"
+   : $"ApiKey     : присутній, довжина {apiKey.Length}");
+
+IBookStore store;
+try
+{
+    store = StoreFactory.Create(args, dataFile);
+}
+catch (InvalidDataException ex)
+{
+    Console.WriteLine($"Помилка: {ex.Message}");
+    return;
+}
 var service = new LendingService(store);
+
+// ===== Тиждень 9: експорт колекції в JSON =====
+// dotnet run --project src/Cli -- export [шлях]
+if (args.Contains("export"))
+{
+    var arg = After("export");
+    var target = arg is not null && !arg.StartsWith("--")
+        ? arg
+        : Path.Combine(Path.GetDirectoryName(dataFile)!, "export.json");
+
+    var items = service.All();
+    try
+    {
+        FileBookStore.Save(target, items);
+        Console.WriteLine($"Експортовано {items.Count} записів у {Path.GetFullPath(target)}");
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        Console.WriteLine($"Не вдалося записати файл: {ex.Message}");
+    }
+    return;
+}
 
 // ===== Тиждень 8: генерація великого файлу (для демонстрації скасування) =====
 // dotnet run --project src/Cli -- gen-import data/big.json 300000

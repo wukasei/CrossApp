@@ -483,8 +483,15 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Лаба 8: великий згенерований файл для демонстрації скасування
-data/big.json
+# Лаба 9: data/ створюється у рантаймі і не комітиться
+# (виняток — вхідні файли для імпорту з попередніх лаб)
+data/*
+!data/import.json
+!data/import-bad.json
+!data/sample.json
+!data/sample.csv
+!data/mixed.csv
+!data/perfect.csv
 
 # Лаба 8: звіт покриття
 coverage-report/

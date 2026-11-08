@@ -247,3 +247,103 @@ dotnet test
   reportgenerator -reports:"tests/Core.Tests/TestResults/*/coverage.cobertura.xml" -targetdir:coverage-report -reporttypes:"Html;TextSummary"
   ```
   Покриття рядків Core — 26.8% (195 з 726). Змінені в цій роботі класи покриті високо: `JsonBookImporter` — 92.5%, `LendingService` — 79.5%, `InMemoryBookStore` — 76.9%. Не покриті `FileBookStore` (працює з диском, тож це предмет інтеграційних, а не модульних тестів), демо й допоміжний код (`SampleData`, `Benchmark`, `EnvironmentInfo`) та старі імпортери `Core.Import`. Не покрита також доменна логіка видач (`Loan`, `LoanService`) і більшість `ReportService`: це не входило в обсяг роботи, але є кандидатом на тести надалі. `coverage-report/` додано в `.gitignore`.
+
+## Лабораторна 9 — Шляхи, JSON, конфігурація, secrets
+
+Мета: прибрати з коду жорстко задані шляхи, винести налаштування в `appsettings.json` з можливістю перевизначення змінними середовища, а секрети зберігати поза репозиторієм.
+
+### Шляхи
+- Літералів шляхів у `src` немає: `git grep -n -F "C:\" src`, `"/home/"`, `"\\"` — 0 результатів.
+- Шляхи будуються через `Path.Combine`, а не конкатенацію з `"\"`: роздільник каталогів залежить від ОС (`\` у Windows, `/` у Linux/macOS).
+- Базовий каталог — `AppContext.BaseDirectory` (каталог зі збіркою `Cli.dll`), а не `Environment.CurrentDirectory`, який залежить від того, звідки запущено процес.
+- `StorageOptions.ResolveFullPath(baseDir)`: абсолютний `DataPath` береться як є, відносний — від `baseDir`; каталог створюється `Directory.CreateDirectory`.
+- `StoreFactory.Create(args, dataFile)` отримує готовий шлях з конфігурації; у `FileBookStore` і фабриці шляхів немає.
+
+Перевірка переносимості — в усіх запусках `Файл даних` однаковий (`src\Cli\bin\Debug\net10.0\data\catalog.json`):
+```bash
+dotnet run --project src/Cli -- report-sum      # з кореня solution
+cd src/Cli && dotnet run -- report-sum          # з src/Cli
+```
+
+### Конфігурація
+- **Пакети** встановлено лише в `src/Cli` (точка входу): `Microsoft.Extensions.Configuration`, `.Json`, `.EnvironmentVariables`, `.Binder`, `.UserSecrets`, `.CommandLine`. Core про файли конфігурації й user-secrets не знає.
+- **AppOptions** (`src/Core/Configuration/AppOptions.cs`) — класи `AppOptions`, `LoggingOptions`, `StorageOptions`, `LibraryOptions` без залежностей від пакетів. Біндинг: `config.Get<AppOptions>()` зіставляє ключі з назвами властивостей (`Storage:DataPath` → `Storage.DataPath`).
+- `appsettings*.json` копіюються у вихідний каталог через `<None Update="appsettings*.json">` з `CopyToOutputDirectory` у `Cli.csproj`; `SetBasePath(AppContext.BaseDirectory)`.
+
+**Порядок джерел** (пізніше перекриває раніше):
+```
+appsettings.json → appsettings.{Environment}.json → user-secrets → змінні CROSSAPP_* → CROSSAPP_DATA_PATH
+```
+
+### Профілі
+| Профіль | Файли | Рівень логу | Розташування даних |
+|---------|-------|-------------|--------------------|
+| базовий | `appsettings.json` | `Information` | `bin/Debug/net10.0/data/catalog.json` |
+| Development | `appsettings.json` + `appsettings.Development.json` | `Debug` | те саме |
+
+Профіль вибирається змінною `CROSSAPP_ENVIRONMENT` (за замовчуванням `Development`). Файл профілю містить лише ключі, що відрізняються від базового `appsettings.json`.
+
+### Ключі конфігурації
+| Ключ | За замовчуванням | Змінна середовища | Призначення |
+|------|------------------|-------------------|-------------|
+| `EnvironmentName` | `Development` | `CROSSAPP_EnvironmentName` | назва профілю у виводі |
+| `Logging:MinimumLevel` | `Information` (`Debug` у Development) | `CROSSAPP_Logging__MinimumLevel` | рівень логу |
+| `Storage:DataPath` | `data` | `CROSSAPP_Storage__DataPath` або `CROSSAPP_DATA_PATH` | каталог даних |
+| `Storage:FileName` | `catalog.json` | `CROSSAPP_Storage__FileName` | ім'я файлу каталогу |
+| `Library:LoanDays` | `14` | `CROSSAPP_Library__LoanDays` | термін видачі (ключ варіанту «Бібліотека») |
+| `Integration:ApiKey` | — (лише user-secrets / env) | `CROSSAPP_Integration__ApiKey` | навчальний secret |
+
+У змінних середовища двокрапка вкладеного ключа замінюється подвійним підкресленням, префікс `CROSSAPP_` відрізається провайдером (`AddEnvironmentVariables(prefix: "CROSSAPP_")`). Проста змінна `CROSSAPP_DATA_PATH` читається окремо й має найвищий пріоритет.
+
+### Приклади змінних середовища
+PowerShell (діють лише в поточному вікні терміналу):
+```powershell
+$env:CROSSAPP_DATA_PATH = "$env:TEMP\crossapp-data"
+$env:CROSSAPP_Logging__MinimumLevel = "Warning"
+dotnet run --project src/Cli -- report-sum
+Remove-Item Env:CROSSAPP_*
+```
+
+bash (лише для однієї команди):
+```bash
+CROSSAPP_DATA_PATH=/tmp/crossapp-data dotnet run --project src/Cli -- report-sum
+CROSSAPP_Logging__MinimumLevel=Warning dotnet run --project src/Cli -- report-sum
+```
+
+Вивід до і після зміни `CROSSAPP_DATA_PATH`:
+```
+Файл даних : C:\Users\Inna\...\CrossApp\src\Cli\bin\Debug\net10.0\data\catalog.json
+Файл даних : C:\Users\Inna\AppData\Local\Temp\crossapp-data\catalog.json
+```
+
+### Secrets
+Secret — навчальний рядок `Integration:ApiKey`. У консоль друкується лише факт наявності й довжина.
+```bash
+dotnet user-secrets init --project src/Cli          # дописує <UserSecretsId> у Cli.csproj (GUID комітиться)
+dotnet user-secrets set "Integration:ApiKey" "local-dev-key" --project src/Cli
+dotnet user-secrets list --project src/Cli
+```
+- Розташування `secrets.json`: Windows — `%APPDATA%\Microsoft\UserSecrets\b653d233-dd22-47c0-85dc-4c0fb8d057e5\secrets.json`; Linux/macOS — `~/.microsoft/usersecrets/<UserSecretsId>/secrets.json`.
+- Файл лежить поза репозиторієм і не шифрується, тому user-secrets — лише для локальної розробки. На сервері — змінна `CROSSAPP_Integration__ApiKey` або сховище секретів.
+- Перевірка: `git status` після `set` не містить `secrets.json`; `git grep --untracked -n "local-dev-key"` — 0 результатів.
+
+```
+ApiKey     : присутній, довжина 13     # з user-secrets
+ApiKey     : присутній, довжина 8      # CROSSAPP_Integration__ApiKey=from-env перекрила secret
+```
+
+### FileBookStore
+- JSON-масив `BookDto` (`id`, `isbn`, `title`, `year`, `author`, `isIssued`). `BookCopy.FromDto` під час читання повторно перевіряє інваріанти.
+- `JsonSerializerOptions`: `PropertyNamingPolicy = CamelCase`, `PropertyNameCaseInsensitive = true` (старий файл з `Id`, `Isbn` теж читається), `Encoder = UnsafeRelaxedJsonEscaping` (кирилиця без `\u0426`), `WriteIndented = true`.
+- **Атомарний запис:** дані пишуться в `catalog.json.tmp`, потім `File.Move(tmp, path, overwrite: true)`. Якщо програма впаде посеред запису, зіпсується лише `.tmp`, основний файл лишиться цілим.
+
+```json
+{
+  "id": "e79602b7",
+  "isbn": "978-617-585-111-2",
+  "title": "Intermezzo",
+  "year": 2020,
+  "author": "Михайло Коцюбинський",
+  "isIssued": false
+}
+```
