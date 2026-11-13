@@ -54,6 +54,35 @@ public sealed class LendingService(IBookStore store, IEnumerable<INotificationSi
         OnChanged(LibraryChangeKind.CopyReturned, copy);
     }
 
+    // Тиждень 10: оновлення даних примірника (для PUT). null — примірника немає.
+    public BookCopy? UpdateBook(string id, string isbn, string title, int year, string? author)
+    {
+        var existing = _store.GetById(id);
+        if (existing is null) return null;
+
+        var replacement = BookCopy.Create(existing.Id, isbn, title, year, author);
+
+        // Create завжди дає «на полиці», тому переносимо статус старого примірника
+        if (existing.Status == CopyStatus.Issued) replacement.Issue();
+        else if (existing.Status == CopyStatus.WrittenOff) replacement.WriteOff();
+
+        _store.Update(replacement);
+        return replacement;
+    }
+
+    // Тиждень 10: видалення примірника (для DELETE). false — примірника немає.
+    public bool RemoveBook(string id)
+    {
+        var copy = _store.GetById(id);
+        if (copy is null) return false;
+
+        if (copy.IsIssued)
+            throw new DomainException(
+                $"Примірник {id} («{copy.Title}») зараз виданий, видалити можна лише після повернення");
+
+        return _store.Remove(id);
+    }
+
     // Тиждень 8: асинхронний імпорт. Імпортер приходить параметром (ручний DI).
     // Додаткове 3: progress отримує відсоток оброблених записів (0–100).
     public async Task<int> ImportAsync(IBookImporter importer, string path,

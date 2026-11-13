@@ -1,0 +1,109 @@
+@host = http://localhost:5080
+
+### Перевірка, що Api запущений
+GET {{host}}/health
+
+### Список усіх примірників
+GET {{host}}/api/books
+
+### Пошук за автором
+GET {{host}}/api/books?author=Франко
+
+### Один примірник
+GET {{host}}/api/books/C-002
+
+
+############ Цикл create-read-update-delete ############
+
+### 1. CREATE — очікується 201 і заголовок Location
+# @name createBook
+POST {{host}}/api/books
+Content-Type: application/json
+
+{
+  "isbn": "978-617-585-111-2",
+  "title": "Intermezzo",
+  "author": "Михайло Коцюбинський",
+  "year": 2020
+}
+
+### 2. READ — щойно створений примірник, 200
+GET {{host}}/api/books/{{createBook.response.body.$.id}}
+
+### 3. UPDATE — правильні дані, 200, рік змінився на 2021
+PUT {{host}}/api/books/{{createBook.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "isbn": "978-617-585-111-2",
+  "title": "Intermezzo",
+  "author": "Михайло Коцюбинський",
+  "year": 2021
+}
+
+### 4. UPDATE з порожньою назвою — 400 з переліком полів
+PUT {{host}}/api/books/{{createBook.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "isbn": "978-617-585-111-2",
+  "title": "",
+  "author": "Михайло Коцюбинський",
+  "year": 2021
+}
+
+### 5. DELETE — 204
+DELETE {{host}}/api/books/{{createBook.response.body.$.id}}
+
+### 6. READ після видалення — 404
+GET {{host}}/api/books/{{createBook.response.body.$.id}}
+
+
+############ Помилки ############
+
+### Валідація: порожні поля, рік 1200 — 400 з errors
+POST {{host}}/api/books
+Content-Type: application/json
+
+{
+  "isbn": "",
+  "title": "",
+  "author": null,
+  "year": 1200
+}
+
+### Тіло не розібралося: рік рядком — 400 «Некоректний запит»
+POST {{host}}/api/books
+Content-Type: application/json
+
+{
+  "isbn": "1",
+  "title": "X",
+  "year": "abc"
+}
+
+### Неіснуючий примірник — 404
+GET {{host}}/api/books/NOPE
+
+### Видалити виданий примірник — 409
+DELETE {{host}}/api/books/C-001
+
+############ Пагінація ############
+
+### Перша сторінка по 5 — items: 5, total: 20
+GET {{host}}/api/books?page=1&pageSize=5
+
+### Остання сторінка — C-016…C-020
+GET {{host}}/api/books?page=4&pageSize=5
+
+### За межами — items порожній, total: 20
+GET {{host}}/api/books?page=5&pageSize=5
+
+### Пошук у назві — три примірники «Кобзаря»
+GET {{host}}/api/books?search=кобзар
+
+### Пошук в авторі з пагінацією — total: 5, на сторінці 2
+GET {{host}}/api/books?search=іван&page=1&pageSize=2
+
+### Некоректні параметри — 400 з page і pageSize
+GET {{host}}/api/books?page=0&pageSize=500

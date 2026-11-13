@@ -6,6 +6,7 @@
 ## Структура рішення
 - **Core** (class library) — містить допоміжний код для отримання інформації про середовище виконання. Не має точки входу. Зарезервовані каталоги: `Core/Dto/`, `Core/Domain/`, `Core/Storage/`.
 - **Cli** (console app) — точка входу. Використовує `ProjectReference` на Core, лише форматує та виводить дані. Жодної бізнес-логіки.
+- **Api** (ASP.NET Core Minimal API) — друга точка входу поряд із Cli. Використовує той самий Core, надає CRUD над примірниками через HTTP. Бізнес-логіки не містить.
 
 ## Команди
 ```bash
@@ -345,4 +346,56 @@ ApiKey     : присутній, довжина 8      # CROSSAPP_Integration__A
   "author": "Михайло Коцюбинський",
   "isIssued": false
 }
+```
+
+## Лабораторна 10 — Minimal API, валідація, OpenAPI (Scalar)
+
+`src/Api` — друга точка входу над тим самим Core; Core не залежить від ASP.NET. Доступ до даних прихований за `IBookStore`, тож перехід на EF Core (тиждень 11) не змінить маршрутів і формату відповідей.
+
+### Запуск
+Порт зафіксовано в `src/Api/Properties/launchSettings.json`: **http://localhost:5080**.
+```bash
+dotnet run --project src/Api
+dotnet run --project src/Api --urls http://localhost:5090   # якщо 5080 зайнятий
+```
+Лише в Development: Scalar UI — `/scalar/v1`, OpenAPI — `/openapi/v1.json`.
+Сховище: `Storage:Kind` = `memory` (за замовчуванням, 20 примірників з `SampleData`) або `file` (змінна `CROSSAPP_Storage__Kind=file`).
+
+### Маршрути
+| Метод | Шлях | Тіло | Коди |
+|-------|------|------|------|
+| GET | `/api/books?page=1&pageSize=20&search=...&author=...` | — | 200 `{ items, total, page, pageSize }`, 400 |
+| GET | `/api/books/{id}` | — | 200, 404 |
+| POST | `/api/books` | `SaveBookRequest` | 201 + `Location`, 400 |
+| PUT | `/api/books/{id}` | `SaveBookRequest` | 200, 400, 404 |
+| DELETE | `/api/books/{id}` | — | 204, 404, 409 (примірник виданий) |
+
+`SaveBookRequest`: `isbn`, `title` (обов'язкові), `author`, `year` (1450…поточний рік).
+Відповідь: `id`, `isbn`, `title`, `author`, `year`, `status` (`available` / `issued` / `writtenOff`).
+
+### curl
+```bash
+curl -i "http://localhost:5080/api/books?page=1&pageSize=5"
+curl -i -X POST http://localhost:5080/api/books -H "Content-Type: application/json" \
+  -d '{"isbn":"978-617-585-111-2","title":"Intermezzo","author":"Михайло Коцюбинський","year":2020}'
+curl -i http://localhost:5080/api/books/<id>              # 200
+curl -i -X DELETE http://localhost:5080/api/books/<id>    # 204, повторний GET — 404
+curl -i -X DELETE http://localhost:5080/api/books/C-001   # 409: примірник виданий
+```
+У PowerShell — `curl.exe` і тіло з файлу: `--data-binary "@data/book.json"` (також `data/bad.json` — 400 з переліком полів, `data/bad-type.json` — 400 «Некоректний запит»). Усі запити зібрано в `src/Api/Api.http`.
+
+### Помилки
+Формат ProblemDetails (RFC 9457), без stack trace: `AddProblemDetails` + `UseExceptionHandler` + `UseStatusCodePages`.
+- Валідація `SaveBookRequest` — FluentValidation (`SaveBookRequestValidator`), викликається фільтром `ValidationFilter<T>` через `AddEndpointFilter` → 400 з `errors` за полями.
+- `DomainExceptionHandler` — `DomainException` → 409.
+- `ApiExceptionHandler` — кривий JSON / порожнє тіло → 400.
+- Решта винятків → 500 без деталей.
+
+### DI
+`IBookStore` і `LendingService` — Singleton: дані спільні для всіх запитів. Сховище обгорнуте в `SynchronizedBookStore` (`lock`), бо запити обробляються паралельно. Валідатор — Singleton (без стану).
+
+### Тести
+`tests/Api.Tests` — інтеграційні тести на `WebApplicationFactory<Program>` з порожнім in-memory сховищем (`ConfigureTestServices`): POST → 201 і GET за `Location` → 200; невалідний POST → 400 з полями; DELETE, потім GET → 404.
+```bash
+dotnet test   # total: 19; failed: 0
 ```
