@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Hosting;
 
 namespace Api.Tests;
 
@@ -16,8 +17,11 @@ public sealed class BooksApiTests
     // тести не залежать від SampleData, файлу даних чи змінних середовища і не впливають один на одного
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
-                services.AddSingleton<IBookStore>(new SynchronizedBookStore(new InMemoryBookStore()))));
+                services.AddSingleton<IBookStore>(new SynchronizedBookStore(new InMemoryBookStore())));
+        });
 
     private static readonly SaveBookRequest ValidBook =
         new("978-617-585-111-2", "Intermezzo", "Михайло Коцюбинський", 2020);

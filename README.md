@@ -399,3 +399,90 @@ curl -i -X DELETE http://localhost:5080/api/books/C-001   # 409: примірн�
 ```bash
 dotnet test   # total: 19; failed: 0
 ```
+
+## Лаба 11: EF Core + SQLite
+
+Api зберігає дані у SQLite через EF Core. Окремий сервер БД не потрібен: уся база — один файл.
+
+### Структура
+
+- `src/Core` — домен і `IBookStore`, **без EF Core**;
+- `src/Infrastructure` — `AppDbContext`, `BookRow`/`CopyRow` (Books 1:N Copies), `EfBookStore`, `Migrations/`;
+- `src/Api` — реєструє `AddDbContext` (Scoped) і `AddScoped<IBookStore, EfBookStore>`.
+
+### Налаштування
+
+`src/Api/appsettings.json`:
+
+```json
+"ConnectionStrings": {
+  "AppDb": "Data Source=data/app.db"
+},
+"Storage": {
+  "Kind": "sqlite"
+}
+```
+
+- `ConnectionStrings:AppDb` — рядок підключення. Відносний шлях рахується від каталогу проєкту Api (`ContentRootPath`), тому файл БД: **`src/Api/data/app.db`**. Каталог `data/` створюється автоматично.
+- Перевизначити змінною середовища: `CROSSAPP_ConnectionStrings__AppDb="Data Source=D:/db/app.db"`.
+- `Storage:Kind` — `sqlite` (за замовчуванням), `memory` або `file`.
+
+Файли `*.db`, `*.db-shm`, `*.db-wal` у `.gitignore`. У git лежать лише міграції.
+
+### Інструмент міграцій (один раз на машину)
+
+```bash
+dotnet tool install --global dotnet-ef --version "10.*"
+dotnet ef --version
+```
+
+### Команди міграцій (з кореня репозиторію)
+
+```bash
+# створити схему БД на чистій копії / застосувати нові міграції
+dotnet ef database update --project src/Infrastructure --startup-project src/Api
+
+# додати нову міграцію після зміни моделі
+dotnet ef migrations add <Назва> --project src/Infrastructure --startup-project src/Api
+
+# список міграцій (застосовані / ні)
+dotnet ef migrations list --project src/Infrastructure --startup-project src/Api
+
+# SQL-скрипт усіх міграцій
+dotnet ef migrations script --project src/Infrastructure --startup-project src/Api
+
+# прибрати останню НЕ застосовану міграцію
+dotnet ef migrations remove --project src/Infrastructure --startup-project src/Api
+```
+
+У середовищі Development Api застосовує міграції автоматично під час старту (`Database.Migrate()`).
+
+### Як скинути БД
+
+Варіант 1, через EF:
+
+```bash
+dotnet ef database drop --force --project src/Infrastructure --startup-project src/Api
+dotnet ef database update --project src/Infrastructure --startup-project src/Api
+```
+
+Варіант 2, видалити файли вручну (Api має бути зупинений):
+
+```powershell
+# Windows PowerShell
+Remove-Item src/Api/data/app.db* 
+dotnet ef database update --project src/Infrastructure --startup-project src/Api
+```
+
+```bash
+# Linux / macOS
+rm -f src/Api/data/app.db*
+dotnet ef database update --project src/Infrastructure --startup-project src/Api
+```
+
+### Перевірка
+
+```bash
+sqlite3 src/Api/data/app.db ".tables"
+# Books  Copies  __EFMigrationsHistory  __EFMigrationsLock
+```

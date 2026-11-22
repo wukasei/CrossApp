@@ -495,3 +495,9 @@ data/*
 
 # Лаба 8: звіт покриття
 coverage-report/
+
+
+# Лаба 11: файл БД SQLite не комітиться — відтворюється міграціями (dotnet ef database update)
+*.db
+*.db-shm
+*.db-wal

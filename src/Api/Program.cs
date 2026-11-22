@@ -9,11 +9,14 @@ using Core.Configuration;
 using Core.Services;
 using Core.Storage;
 using FluentValidation;
+using Infrastructure;
+using Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Ті самі змінні середовища, що й у Cli: CROSSAPP_Storage__Kind, CROSSAPP_Storage__DataPath...
+// Ті самі змінні середовища, що й у Cli: CROSSAPP_Storage__Kind, CROSSAPP_ConnectionStrings__AppDb...
 builder.Configuration.AddEnvironmentVariables(prefix: "CROSSAPP_");
 
 // Кирилиця в JSON-відповідях без \u0406...
@@ -32,23 +35,48 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();      // некор�
 // Валідатори без стану, тому один екземпляр на весь застосунок
 builder.Services.AddSingleton<IValidator<SaveBookRequest>, SaveBookRequestValidator>();
 
-// Сховище: вибір з конфігурації, один екземпляр на весь застосунок (Singleton),
-// обгорнутий у lock, бо запити обробляються паралельно
+// ---------- Сховище ----------
+// Лаба 11: за замовчуванням SQLite через EF Core. memory/file лишились з тижнів 9–10.
 var storage = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
-var storageKind = builder.Configuration["Storage:Kind"] ?? "memory";
+var storageKind = builder.Configuration["Storage:Kind"] ?? "sqlite";
+var useSqlite = storageKind.Equals("sqlite", StringComparison.OrdinalIgnoreCase);
 
-builder.Services.AddSingleton<IBookStore>(_ =>
+if (useSqlite)
 {
-    IBookStore inner = storageKind.Equals("file", StringComparison.OrdinalIgnoreCase)
-        ? new FileBookStore(storage.ResolveFullPath(AppContext.BaseDirectory))
-        : new InMemoryBookStore(SampleData.Books());
-    return new SynchronizedBookStore(inner);
-});
+    // Рядок підключення з ConnectionStrings:AppDb; відносний шлях — від ContentRootPath
+    var appDbConnectionString = SqlitePath.Resolve(
+        builder.Configuration.GetConnectionString("AppDb"),
+        builder.Environment.ContentRootPath);
 
-// Сервіс теж Singleton: він тримає лише посилання на сховище і подію Changed
-builder.Services.AddSingleton<LendingService>();
+    // AddDbContext реєструє AppDbContext як Scoped: окремий екземпляр на кожен HTTP-запит
+    builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite(appDbConnectionString));
+
+    // Сховище теж Scoped — живе стільки ж, скільки його DbContext. lock не потрібен.
+    builder.Services.AddScoped<IBookStore, EfBookStore>();
+}
+else
+{
+    // memory / file: один екземпляр на застосунок, обгорнутий у lock
+    builder.Services.AddSingleton<IBookStore>(_ =>
+    {
+        IBookStore inner = storageKind.Equals("file", StringComparison.OrdinalIgnoreCase)
+            ? new FileBookStore(storage.ResolveFullPath(AppContext.BaseDirectory))
+            : new InMemoryBookStore(SampleData.Books());
+        return new SynchronizedBookStore(inner);
+    });
+}
+
+// Сервіс тепер Scoped: Singleton не може залежати від Scoped-сховища (captive dependency)
+builder.Services.AddScoped<LendingService>();
 
 var app = builder.Build();
+
+// Під час розробки застосовуємо міграції автоматично; у Production — командою dotnet ef database update
+if (useSqlite && app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
+}
 
 // Першими в конвеєрі: перехоплюють винятки з усього, що нижче
 app.UseExceptionHandler();      // виняток → ProblemDetails без stack trace
